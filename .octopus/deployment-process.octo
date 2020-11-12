@@ -36,7 +36,7 @@ steps "Put Shop in Maintenance Mode" {
                 EOT
             Octopus_Action_Template_Id = "ActionTemplates-1"
             Octopus_Action_Template_Version = "6"
-            AppOfflineFileName = "app_offline.htm"
+            AppOfflineFileName = "Maso.html"
             AppOnlineFileName = "app_online.htm"
             Octopus_Action_RunOnServer = "false"
             InstallationFolder = "#{Website.InstallationDirectory}"
