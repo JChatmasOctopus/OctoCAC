@@ -1,0 +1,382 @@
+steps "Put Shop in Maintenance Mode" {
+
+    actions "Put Shop in Maintenance Mode" {
+        action_type = "Octopus.Script"
+        environments = ["Production"]
+
+        properties {
+            Octopus_Action_Script_Syntax = "PowerShell"
+            Octopus_Action_Script_ScriptBody = <<-EOT
+                    $offlineHtml = Join-Path $OctopusParameters["InstallationFolder"] $OctopusParameters["AppOfflineFileName"]
+                    $onlineHtml = Join-Path $OctopusParameters["InstallationFolder"] $OctopusParameters["AppOnlineFileName"]
+                    
+                    if ("#{ChangeMode}" -eq "Online")
+                    {
+                        #Offline exists and so does online - remove offline
+                        if ((Test-Path($offlineHtml)) -and (Test-Path($onlineHtml)))
+                        {
+                            Remove-Item $offlineHtml
+                        }
+                        
+                        #Offline exists and online doesn't - move offline to online
+                        if ((Test-Path($offlineHtml)) -and !(Test-Path($onlineHtml)))
+                        {
+                            Move-Item $offlineHtml $onlineHtml
+                        }
+                    }
+                    
+                    if ("#{ChangeMode}" -eq "Offline")
+                    {
+                        #Online exists and offline doesn't - move online to offline
+                        if ((Test-Path($onlineHtml)) -and !(Test-Path($offlineHtml)))
+                        {
+                            Move-Item $onlineHtml $offlineHtml
+                        }
+                    }
+                EOT
+            Octopus_Action_Template_Id = "ActionTemplates-1"
+            Octopus_Action_Template_Version = "6"
+            AppOfflineFileName = "app_offline.htm"
+            AppOnlineFileName = "app_online.htm"
+            Octopus_Action_RunOnServer = "false"
+            InstallationFolder = "#{Website.InstallationDirectory}"
+            ChangeMode = "Offline"
+        }
+    }
+
+    properties {
+        Octopus_Action_TargetRoles = "octopet-web"
+    }
+}
+
+steps "Update Database Schema" {
+
+    actions "Update Database Schema" {
+        action_type = "Octopus.TentaclePackage"
+
+        packages {
+            acquisition_location = "Server"
+            feed_id_or_name = "Octopus Server (built-in)"
+            package_id = "OctoPet.Database"
+        }
+
+        properties {
+            Octopus_Action_Package_AutomaticallyRunConfigurationTransformationFiles = "True"
+            Octopus_Action_Package_AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
+            Octopus_Action_EnabledFeatures = "Octopus.Features.CustomScripts,Octopus.Features.ConfigurationVariables,Octopus.Features.ConfigurationTransforms"
+            Octopus_Action_Package_PackageId = "OctoPet.Database"
+            Octopus_Action_Package_FeedId = "Octopus Server (built-in)"
+            Octopus_Action_Package_DownloadOnTentacle = "False"
+            Octopus_Action_CustomScripts_Deploy_ps1 = ".\\OctoPet.Deploy.ps1 -d $OctopusParameters[\"Database.Server\"] -l $OctopusParameters[\"Database.SQLUser.Name\"] -p $OctopusParameters[\"Database.SQLUser.Password\"]"
+        }
+    }
+
+    properties {
+        Octopus_Action_TargetRoles = "octopet-db"
+    }
+}
+
+steps "Archive Log Directory" {
+
+    actions "Archive Log Directory" {
+        action_type = "Octopus.Script"
+
+        properties {
+            Octopus_Action_RunOnServer = "false"
+            Octopus_Action_Script_ScriptSource = "Inline"
+            Octopus_Action_Script_Syntax = "PowerShell"
+            Octopus_Action_Script_ScriptBody = <<-EOT
+                    $LogDirectory = Join-Path $OctopusParameters["Website.InstallationDirectory"] "logs"
+                    $LogArchive = "Logs_{0}.zip" -f $OctopusParameters["Octopus.Release.Number"]
+                    $ZipFile = Join-Path -Path $LogDirectory -ChildPath $LogArchive
+                    
+                    Write-Host "Archiving log files: $LogDirectory"
+                    
+                    Compress-Archive -Path $LogDirectory -DestinationPath $ZipFile -Verbose
+                EOT
+        }
+    }
+
+    properties {
+        Octopus_Action_TargetRoles = "octopet-app"
+    }
+}
+
+steps "Deploy Shopping Cart Service" {
+
+    actions "Deploy Shopping Cart Service" {
+        action_type = "Octopus.WindowsService"
+
+        packages {
+            acquisition_location = "Server"
+            feed_id_or_name = "Octopus Server (built-in)"
+            package_id = "OctoPet.CartService"
+        }
+
+        properties {
+            Octopus_Action_WindowsService_CreateOrUpdateService = "True"
+            Octopus_Action_WindowsService_ServiceAccount = "LocalSystem"
+            Octopus_Action_WindowsService_StartMode = "auto"
+            Octopus_Action_WindowsService_DesiredStatus = "Default"
+            Octopus_Action_Package_AutomaticallyRunConfigurationTransformationFiles = "True"
+            Octopus_Action_Package_AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
+            Octopus_Action_EnabledFeatures = "Octopus.Features.WindowsService,Octopus.Features.ConfigurationTransforms,Octopus.Features.ConfigurationVariables"
+            Octopus_Action_WindowsService_ServiceName = "OctoPetCartService_#{Octopus.Environment.Name}"
+            Octopus_Action_WindowsService_DisplayName = "Octo Pet Cart Service #{Octopus.Environment.Name}"
+            Octopus_Action_WindowsService_Description = "Shopping cart processing service"
+            Octopus_Action_WindowsService_ExecutablePath = "OctoPet.CartService.Exe"
+            Octopus_Action_Package_PackageId = "OctoPet.CartService"
+            Octopus_Action_Package_FeedId = "Octopus Server (built-in)"
+            Octopus_Action_Package_DownloadOnTentacle = "False"
+        }
+    }
+
+    properties {
+        Octopus_Action_TargetRoles = "octopet-app"
+    }
+}
+
+steps "Deploy Octopus Pet Shop Store Site" {
+
+    actions "Deploy Octopus Pet Shop Store Site" {
+        action_type = "Octopus.IIS"
+
+        packages {
+            acquisition_location = "Server"
+            feed_id_or_name = "Octopus Server (built-in)"
+            package_id = "OctoPet.Store"
+        }
+
+        properties {
+            Octopus_Action_IISWebSite_DeploymentType = "webSite"
+            Octopus_Action_IISWebSite_CreateOrUpdateWebSite = "True"
+            Octopus_Action_IISWebSite_Bindings = "[{\"protocol\":\"http\",\"port\":\"80\",\"host\":\"#{octopet.hostname}\",\"thumbprint\":null,\"certificateVariable\":null,\"requireSni\":false,\"enabled\":true},{\"protocol\":\"https\",\"ipAddress\":\"*\",\"port\":\"443\",\"host\":\"#{octopet.hostname}\",\"thumbprint\":null,\"requireSni\":false,\"enabled\":true}]"
+            Octopus_Action_IISWebSite_ApplicationPoolFrameworkVersion = "v4.0"
+            Octopus_Action_IISWebSite_ApplicationPoolIdentityType = "ApplicationPoolIdentity"
+            Octopus_Action_IISWebSite_EnableAnonymousAuthentication = "True"
+            Octopus_Action_IISWebSite_EnableBasicAuthentication = "False"
+            Octopus_Action_IISWebSite_EnableWindowsAuthentication = "False"
+            Octopus_Action_IISWebSite_WebApplication_ApplicationPoolFrameworkVersion = "v4.0"
+            Octopus_Action_IISWebSite_WebApplication_ApplicationPoolIdentityType = "ApplicationPoolIdentity"
+            Octopus_Action_Package_AutomaticallyRunConfigurationTransformationFiles = "True"
+            Octopus_Action_Package_AutomaticallyUpdateAppSettingsAndConnectionStrings = "True"
+            Octopus_Action_EnabledFeatures = "Octopus.Features.IISWebSite,Octopus.Features.CustomDirectory,Octopus.Features.CustomScripts,Octopus.Features.ConfigurationVariables,Octopus.Features.ConfigurationTransforms"
+            Octopus_Action_IISWebSite_WebRootType = "packageRoot"
+            Octopus_Action_IISWebSite_StartApplicationPool = "True"
+            Octopus_Action_IISWebSite_StartWebSite = "True"
+            Octopus_Action_IISWebSite_WebSiteName = "OctoPets"
+            Octopus_Action_IISWebSite_ApplicationPoolName = "OctoPet.#{Octopus.Environment.Name}"
+            Octopus_Action_Package_PackageId = "OctoPet.Store"
+            Octopus_Action_Package_FeedId = "Octopus Server (built-in)"
+            Octopus_Action_Package_DownloadOnTentacle = "False"
+        }
+    }
+
+    properties {
+        Octopus_Action_TargetRoles = "octopet-web"
+    }
+}
+
+steps "Test URL" {
+
+    actions "Test URL" {
+        action_type = "Octopus.Script"
+
+        properties {
+            Octopus_Action_Script_ScriptBody = <<-EOT
+                    $uri = $OctopusParameters['Uri']
+                    $customHostHeader = $OctopusParameters['CustomHostHeader']
+                    $expectedCode = [int] $OctopusParameters['ExpectedCode']
+                    $timeoutSeconds = [int] $OctopusParameters['TimeoutSeconds']
+                    $Username = $OctopusParameters['AuthUsername']
+                    $Password = $OctopusParameters['AuthPassword']
+                    $UseWindowsAuth = [System.Convert]::ToBoolean($OctopusParameters['UseWindowsAuth'])
+                    $ExpectedResponse = $OctopusParameters['ExpectedResponse']
+                    $securityProtocol = $OctopusParameters['SecurityProtocol']
+                    
+                    Write-Host "Starting verification request to $uri"
+                    if ($customHostHeader)
+                    {
+                        Write-Host "Using custom host header $customHostHeader"
+                    }
+                    
+                    Write-Host "Expecting response code $expectedCode."
+                    Write-Host "Expecting response: $ExpectedResponse."
+                    
+                    if ($securityProtocol)
+                    {
+                        Write-Host "Using security protocol $securityProtocol"
+                        [Net.ServicePointManager]::SecurityProtocol = [Enum]::parse([Net.SecurityProtocolType], $securityProtocol) 
+                    }
+                    
+                    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+                    $success = $false
+                    do
+                    {
+                        try
+                        {
+                            if ($Username -and $Password -and $UseWindowsAuth)
+                            {
+                                Write-Host "Making request to $uri using windows authentication for user $Username"
+                                $request = [system.Net.WebRequest]::Create($uri)
+                                $Credential = New-Object System.Management.Automation.PSCredential -ArgumentList $Username, $(ConvertTo-SecureString -String $Password -AsPlainText -Force)
+                                $request.Credentials = $Credential 
+                                
+                                if ($customHostHeader)
+                                {
+                                    $request.Host = $customHostHeader
+                                }
+                    
+                                try
+                                {
+                                    $response = $request.GetResponse()
+                                }
+                                catch [System.Net.WebException]
+                                {
+                                    Write-Host "Request failed :-( System.Net.WebException"
+                                    Write-Host $_.Exception
+                                    $response = $_.Exception.Response
+                                }
+                                
+                            }
+                    		elseif ($Username -and $Password)
+                            {
+                                Write-Host "Making request to $uri using basic authentication for user $Username"
+                                $Credential = New-Object System.Management.Automation.PSCredential -ArgumentList $Username, $(ConvertTo-SecureString -String $Password -AsPlainText -Force)
+                                if ($customHostHeader)
+                                {
+                                    $response = Invoke-WebRequest -Uri $uri -Method Get -UseBasicParsing -Credential $Credential -Headers @{"Host" = $customHostHeader} -TimeoutSec $timeoutSeconds
+                                }
+                                else 
+                                {
+                                    $response = Invoke-WebRequest -Uri $uri -Method Get -UseBasicParsing -Credential $Credential -TimeoutSec $timeoutSeconds
+                                }
+                            }
+                    		else
+                            {
+                                Write-Host "Making request to $uri using anonymous authentication"
+                                if ($customHostHeader)
+                                {
+                                    $response = Invoke-WebRequest -Uri $uri -Method Get -UseBasicParsing -Headers @{"Host" = $customHostHeader} -TimeoutSec $timeoutSeconds
+                                }
+                                else 
+                                {
+                                    $response = Invoke-WebRequest -Uri $uri -Method Get -UseBasicParsing -TimeoutSec $timeoutSeconds
+                                }
+                            }
+                            
+                            $code = $response.StatusCode
+                            $body = $response.Content;
+                            Write-Host "Recieved response code: $code"
+                            Write-Host "Recieved response: $body"
+                    
+                            if($response.StatusCode -eq $expectedCode)
+                            {
+                                $success = $true
+                            }
+                            if ($success -and $ExpectedResponse)
+                            {
+                                $success = ($ExpectedResponse -eq $body)
+                            }
+                        }
+                        catch
+                        {
+                            # Anything other than a 200 will throw an exception so
+                            # we check the exception message which may contain the 
+                            # actual status code to verify
+                            
+                            Write-Host "Request failed :-("
+                            Write-Host $_.Exception
+                    
+                            if($_.Exception -like "*($expectedCode)*")
+                            {
+                                $success = $true
+                            }
+                        }
+                    
+                        if(!$success)
+                        {
+                            Write-Host "Trying again in 5 seconds..."
+                            Start-Sleep -s 5
+                        }
+                    }
+                    while(!$success -and $timer.Elapsed -le (New-TimeSpan -Seconds $timeoutSeconds))
+                    
+                    $timer.Stop()
+                    
+                    # Verify result
+                    
+                    if(!$success)
+                    {
+                        throw "Verification failed - giving up."
+                    }
+                    
+                    Write-Host "Sucesss! Found status code $expectedCode"
+                EOT
+            Octopus_Action_Script_Syntax = "PowerShell"
+            Octopus_Action_Script_ScriptSource = "Inline"
+            Octopus_Action_Template_Id = "ActionTemplates-2"
+            Octopus_Action_Template_Version = "15"
+            ExpectedCode = "200"
+            TimeoutSeconds = "60"
+            UseWindowsAuth = "False"
+            Octopus_Action_RunOnServer = "false"
+            Uri = "http://localhost"
+        }
+    }
+
+    properties {
+        Octopus_Action_TargetRoles = "octopet-web"
+    }
+}
+
+steps "Take Shop Out of Maintenance Mode" {
+
+    actions "Take Shop Out of Maintenance Mode" {
+        action_type = "Octopus.Script"
+        environments = ["Production"]
+
+        properties {
+            Octopus_Action_Script_Syntax = "PowerShell"
+            Octopus_Action_Script_ScriptBody = <<-EOT
+                    $offlineHtml = Join-Path $OctopusParameters["InstallationFolder"] $OctopusParameters["AppOfflineFileName"]
+                    $onlineHtml = Join-Path $OctopusParameters["InstallationFolder"] $OctopusParameters["AppOnlineFileName"]
+                    
+                    if ("#{ChangeMode}" -eq "Online")
+                    {
+                        #Offline exists and so does online - remove offline
+                        if ((Test-Path($offlineHtml)) -and (Test-Path($onlineHtml)))
+                        {
+                            Remove-Item $offlineHtml
+                        }
+                        
+                        #Offline exists and online doesn't - move offline to online
+                        if ((Test-Path($offlineHtml)) -and !(Test-Path($onlineHtml)))
+                        {
+                            Move-Item $offlineHtml $onlineHtml
+                        }
+                    }
+                    
+                    if ("#{ChangeMode}" -eq "Offline")
+                    {
+                        #Online exists and offline doesn't - move online to offline
+                        if ((Test-Path($onlineHtml)) -and !(Test-Path($offlineHtml)))
+                        {
+                            Move-Item $onlineHtml $offlineHtml
+                        }
+                    }
+                EOT
+            Octopus_Action_Template_Id = "ActionTemplates-1"
+            Octopus_Action_Template_Version = "6"
+            AppOfflineFileName = "app_offline.htm"
+            AppOnlineFileName = "app_online.htm"
+            Octopus_Action_RunOnServer = "false"
+            InstallationFolder = "#{Website.InstallationDirectory}"
+            ChangeMode = "Online"
+        }
+    }
+
+    properties {
+        Octopus_Action_TargetRoles = "octopet-web"
+    }
+}
