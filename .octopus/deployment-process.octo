@@ -53,7 +53,7 @@ steps "Update Database Schema" {
 
     actions "Update Database Schema" {
         action_type = "Octopus.TentaclePackage"
-        notes = "This updates the [database](https://github.com/OctopusDeploy/Issues/issues/6608)."
+        notes = "This updates the [database](https://github.com/OctopusDeploy/Issues/issues/6608). #{Database.Name}"
 
         packages {
             acquisition_location = "Server"
