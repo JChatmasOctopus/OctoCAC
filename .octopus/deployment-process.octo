@@ -53,11 +53,16 @@ steps "Update Database Schema" {
 
     actions "Update Database Schema" {
         action_type = "Octopus.TentaclePackage"
+        notes = "This updates the database."
 
         packages {
             acquisition_location = "Server"
             feed_id_or_name = "Octopus Server (built-in)"
             package_id = "OctoPet.Database"
+
+            properties {
+                SelectionMode = "immediate"
+            }
         }
 
         properties {
